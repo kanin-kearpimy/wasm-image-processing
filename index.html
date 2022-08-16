@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Styling with Filtering</title>
+</head>
+<body>
+    <label for="url-file">Image File URL: </label>
+    <input type="text" id="url-file">
+    <div class="main">
+        <div class="item">
+            <span>
+                C++ Convert: <span id="cpp-convert-time"></span>
+            </span>
+            <canvas id="output"></canvas>
+        </div>
+        <div class="item">
+            <span>
+                JS Convert: <span id="js-convert-time"></span>
+            </span>
+            <canvas id="jsg"></canvas>
+        </div>
+        <div class="item">
+            <span>Original</span>
+            <canvas id="origin"></canvas>
+        </div>
+    </div>
+
+    <button id="sqart">Gray out</button>
+</body>
+<style>
+    .main {
+        display: flex;
+        flex-wrap: wrap;
+        flex: 1 1 1;
+    }
+    .item {
+        display: flex;
+        flex-direction: column;
+        margin: 10px;
+    }
+    .item > span {
+        margin: 12px;
+        font-size: 24px;
+    }
+</style>
+<script type="text/javascript">
+    const WASM_URL = "./image-processing.wasm";
+    const WASM_JS_URL = "./image-processing.js";
+
+    const getWASMModule = () => {
+        return new Promise((resolve, reject) => {
+            if(!("WebAssembly" in window)) {
+                console.warn("Your Browser doesn't support WASM");
+                reject("Your Browser doesn't support WASM");
+            }
+            fetch(WASM_URL).then((response) => {
+                return response.arrayBuffer();
+            }).then(buffer => {
+                const wasmModule = WebAssembly.compile(buffer);
+                const script = document.createElement("script");
+
+                script.addEventListener("wasmDone", buildWam);
+                script.src = WASM_JS_URL;
+
+                window.wasmScript = script;
+
+                window.wasmDoneEvent = new Event("wasmDone");
+                document.body.appendChild(script);
+
+                function buildWam() {
+                    Module.wasmBinary = buffer;
+                    console.log("Emscripten boilerplate loaded.");
+                    /* 
+                    const wasmMethods = {};
+                    wasmMethods["getSqrt"] = function(number) {
+                        return _getSqrt(number);
+                    }
+                    wasmMethods["getSqr"] = function(number) {
+                        return _getSqr(number);
+                    }
+                    console.log(wasmMethods)
+                    resolve(wasmMethods);
+                    */
+                }
+            })
+        })
+    }
+
+    function toCanvas(source){
+        if(source instanceof HTMLCanvasElement){
+            return source;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = source.videoWidth || source.naturalWidth || source.width;
+        canvas.height = source.videoHeight || source.naturalHeight || source.height;
+        canvas.getContext("2d").drawImage(source, 0, 0, canvas.width, canvas.height);
+        return canvas;
+    }
+
+    function getImageData({ url, width = 244, height = 224 }) {
+        console.assert(url);
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "anonymous";
+            img.src = url;
+            img.width = width;
+            img.height = height;
+            img.onload = function() {
+                var canvas = toCanvas(img);
+                resolve(
+                    canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height)
+                );
+            };
+            img.onerror = function(e) {
+                reject(e);
+            };
+        });
+    }
+
+    function transferImageJStoWASM(imageData){
+        const { length } = imageData.data;
+        const memory = _malloc(length);
+        HEAPU8.set(imageData.data, memory);
+        _grayScale(memory, length);
+        const filteredIMageData = HEAPU8.subarray(memory, memory + length);
+        _free(memory);
+        return filteredIMageData
+    }
+
+    function writeImageDataToCanvas(canvas, data, width, height) {
+        canvas.width = width;
+        canvas.height = height;
+        var context = canvas.getContext("2d");
+        var imageData = context.createImageData(width, height);
+        imageData.data.set(data);
+        context.putImageData(imageData, 0, 0);
+        return canvas;
+    }
+
+    function jsGrayScale(data) {
+        const { length } = data;
+        let newData = [...data];
+        for(let i = 0; i < length; i+= 4){
+            let r = data[i];
+            let g = data[i+1];
+            let b = data[i+2];
+            let a = data[i+3];
+            newData[i] = r;
+            newData[i+1] = r;
+            newData[i+2] = r;
+            newData[i+3] = a;
+        }
+        return newData
+    }
+
+    setTimeout(async () => {
+        var wasmModule = await getWASMModule();
+    }, 500)
+
+    const outputCanvas = document.querySelector('canvas#output');
+    const originalCanvas = document.querySelector('canvas#origin');
+    const jsGrayScaleCanvas = document.querySelector('canvas#jsg');
+    
+    document.querySelector("#sqart").addEventListener("click", async () => {
+        const url = document.querySelector('#url-file').value ? document.querySelector('#url-file').value : 'https://cdn.pixabay.com/photo/2015/04/23/22/00/tree-736885__480.jpg';
+        console.log(url)
+        const imageData = await getImageData({url});
+        const { width, height } = imageData
+
+        var jsStartTime = window.performance.now();
+        console.log('JS Manipulation');
+        const jsGrayScaleData = jsGrayScale(imageData.data);
+        var jsEndTime = window.performance.now();
+        var jsResultTime = jsEndTime - jsStartTime;
+        console.log(jsResultTime)
+
+        var cppStartTime = window.performance.now();
+        console.log('C++ Manipulation');
+        const filteredImg = transferImageJStoWASM(imageData);
+        var cppEndTime = window.performance.now();
+        var cppResultTime = cppEndTime - cppStartTime;
+        console.log(cppResultTime)
+
+        const canvasFilter = writeImageDataToCanvas(outputCanvas, filteredImg, width, height);
+        const canvasOrigin = writeImageDataToCanvas(originalCanvas, imageData.data, width, height);
+        const canvasJsGray = writeImageDataToCanvas(jsGrayScaleCanvas, jsGrayScaleData, width, height);
+
+        document.querySelector('#js-convert-time').innerHTML = jsResultTime;
+        document.querySelector('#cpp-convert-time').innerHTML = cppResultTime;
+    })
+</script>
+</html>
