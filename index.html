@@ -167,23 +167,18 @@
     
     document.querySelector("#sqart").addEventListener("click", async () => {
         const url = document.querySelector('#url-file').value ? document.querySelector('#url-file').value : 'https://cdn.pixabay.com/photo/2015/04/23/22/00/tree-736885__480.jpg';
-        console.log(url)
         const imageData = await getImageData({url});
         const { width, height } = imageData
 
         var jsStartTime = window.performance.now();
-        console.log('JS Manipulation');
         const jsGrayScaleData = jsGrayScale(imageData.data);
         var jsEndTime = window.performance.now();
         var jsResultTime = jsEndTime - jsStartTime;
-        console.log(jsResultTime)
 
         var cppStartTime = window.performance.now();
-        console.log('C++ Manipulation');
         const filteredImg = transferImageJStoWASM(imageData);
         var cppEndTime = window.performance.now();
         var cppResultTime = cppEndTime - cppStartTime;
-        console.log(cppResultTime)
 
         const canvasFilter = writeImageDataToCanvas(outputCanvas, filteredImg, width, height);
         const canvasOrigin = writeImageDataToCanvas(originalCanvas, imageData.data, width, height);
